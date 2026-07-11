@@ -1,0 +1,18 @@
+{
+  "name": "vortexjob-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VortexJob - Distributed Job Scheduler with Glassmorphic Dashboard and DAG support",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "build:all": "npm run build --prefix frontend && npm run build --prefix backend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:worker": "npm run worker --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev": "concurrently -n \"api,worker,web\" -c \"magenta,cyan,blue\" \"npm run dev:backend\" \"npm run dev:worker\" \"npm run dev:frontend\"",
+    "start:prod": "npm run start:prod --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  vortexjob:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vortexjob-scheduler:latest
+    container_name: vortexjob-app
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - JWT_SECRET=super-secret-key-change-me-in-production
+      - DB_PATH=/app/backend/data/jobs.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-} # Pass Gemini API key from host env if set
+    volumes:
+      - vortexjob-db-data:/app/backend/data
+    restart: unless-stopped
+
+volumes:
+  vortexjob-db-data:
+    driver: local
