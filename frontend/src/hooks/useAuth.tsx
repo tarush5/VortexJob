@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import toast from 'react-hot-toast';
 import type { User, Project } from '../types';
 import { authApi, orgApi, projectApi, setToken, clearToken } from '../api';
 
@@ -50,12 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setProjects(projList);
       setSelectedProject(projList[0]);
-    } catch {
-      clearToken();
-      setTokenState(null);
-      setUser(null);
-      setProjects([]);
-      setSelectedProject(null);
+    } catch (err: any) {
+      console.error('Initialization error:', err);
+      if (err.message?.includes('Session expired')) {
+        clearToken();
+        setTokenState(null);
+        setUser(null);
+        setProjects([]);
+        setSelectedProject(null);
+      } else {
+        toast.error(`Login failed: ${err.message || 'Unknown error'}`);
+        clearToken();
+        setTokenState(null);
+        setUser(null);
+      }
     }
     setLoading(false);
   }, [token]);
