@@ -85,7 +85,7 @@ export class QueueService {
     }
 
     const avgDuration = db.prepare(
-      `SELECT AVG(duration_ms) as avg_ms FROM job_executions WHERE job_id IN (SELECT id FROM jobs WHERE queue_id = ?) AND status = 'completed'`
+      `SELECT AVG(e.duration_ms) as avg_ms FROM job_executions e JOIN jobs j ON e.job_id = j.id WHERE j.queue_id = ? AND e.status = 'completed'`
     ).get(id) as { avg_ms: number | null };
 
     const oneHourAgo = new Date(Date.now() - 3600000).toISOString();

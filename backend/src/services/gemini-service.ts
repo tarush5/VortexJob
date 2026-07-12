@@ -29,25 +29,35 @@ ${logsCombined || '(No log entries recorded)'}
 Provide the response in clean, beautiful Markdown format. Keep it concise (maximum 3 paragraphs).`;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
 
-      if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
+      // AbortController with 15-second timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`API returned HTTP ${response.status}`);
+        }
+
+        const json = (await response.json()) as any;
+        const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) {
+          throw new Error('Invalid response structure from Gemini');
+        }
+
+        return text;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const json = (await response.json()) as any;
-      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error('Invalid response structure from Gemini');
-      }
-
-      return text;
     } catch (err: any) {
       log.error(`Gemini API query failed: ${err.message}. Falling back.`);
       return this.getFallbackSummary(jobName, errorMessage, logs);

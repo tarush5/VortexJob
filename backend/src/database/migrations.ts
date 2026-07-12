@@ -190,6 +190,12 @@ CREATE TABLE IF NOT EXISTS job_dependencies (
 );
 CREATE INDEX IF NOT EXISTS idx_dependencies_job ON job_dependencies(job_id);
 CREATE INDEX IF NOT EXISTS idx_dependencies_parent ON job_dependencies(depends_on_job_id);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_completed_at ON jobs(queue_id, status, completed_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_cron_status ON jobs(cron_expression, status) WHERE cron_expression IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dlq_original_job ON dead_letter_queue(original_job_id);
+CREATE INDEX IF NOT EXISTS idx_heartbeats_ts ON worker_heartbeats(worker_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_workers_heartbeat ON workers(status, last_heartbeat_at);
 `;
 
 export function runMigrations(): void {

@@ -44,7 +44,7 @@ export class SchedulerService {
         log.debug(`Cron job rescheduled: ${job.name} → next run at ${nextRun}`);
         processed++;
       } catch (err: any) {
-        log.error(`Failed to reschedule cron job ${job.id}: ${err.message}`);
+        log.error(`Failed to reschedule cron job ${job.id}: ${err.message}`, { stack: err.stack, jobName: job.name, cronExpression: job.cron_expression });
       }
     }
 
@@ -64,6 +64,16 @@ export class SchedulerService {
       log.debug(`Promoted ${result.changes} scheduled jobs to queued`);
     }
     return result.changes;
+  }
+
+  /**
+   * List all active schedules (jobs with a cron expression) for a specific queue.
+   */
+  listSchedules(queueId: string): Job[] {
+    const db = getDb();
+    return db.prepare(
+      `SELECT * FROM jobs WHERE queue_id = ? AND cron_expression IS NOT NULL ORDER BY created_at DESC`
+    ).all(queueId) as Job[];
   }
 }
 

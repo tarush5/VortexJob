@@ -10,46 +10,53 @@ export class ReaperService {
   /**
    * Find workers whose heartbeat has expired and reclaim their jobs.
    * This prevents jobs from being permanently locked by dead workers.
+   * The entire operation is wrapped in a transaction for atomicity.
    */
   reap(): { staleWorkers: number; reclaimedJobs: number } {
     const db = getDb();
     const cutoff = new Date(Date.now() - config.heartbeatTimeoutMs).toISOString();
     const now = new Date().toISOString();
 
-    // Find stale active workers
-    const staleWorkers = db.prepare(
-      `SELECT * FROM workers WHERE status = 'active' AND last_heartbeat_at < ?`
-    ).all(cutoff) as Worker[];
+    const txn = db.transaction(() => {
+      // Find stale active workers
+      const staleWorkers = db.prepare(
+        `SELECT * FROM workers WHERE status = 'active' AND last_heartbeat_at < ?`
+      ).all(cutoff) as Worker[];
 
-    let reclaimedJobs = 0;
+      let reclaimedJobs = 0;
 
-    for (const worker of staleWorkers) {
-      log.warn(`Stale worker detected: ${worker.name} (${worker.id}), last heartbeat: ${worker.last_heartbeat_at}`);
+      for (const worker of staleWorkers) {
+        log.warn(`Stale worker detected: ${worker.name} (${worker.id}), last heartbeat: ${worker.last_heartbeat_at}`);
 
-      // Mark worker as inactive
-      db.prepare(`UPDATE workers SET status = 'inactive', stopped_at = ? WHERE id = ?`).run(now, worker.id);
+        // Mark worker as inactive
+        db.prepare(`UPDATE workers SET status = 'inactive', stopped_at = ? WHERE id = ?`).run(now, worker.id);
 
-      // Find all claimed/running jobs locked by this worker
-      const orphanedJobs = db.prepare(
-        `SELECT * FROM jobs WHERE locked_by_worker_id = ? AND status IN ('claimed', 'running')`
-      ).all(worker.id) as Job[];
+        // Find all claimed/running jobs locked by this worker
+        const orphanedJobs = db.prepare(
+          `SELECT * FROM jobs WHERE locked_by_worker_id = ? AND status IN ('claimed', 'running')`
+        ).all(worker.id) as Job[];
 
-      for (const job of orphanedJobs) {
-        log.warn(`Reclaiming orphaned job: ${job.name} (${job.id})`);
-        // Re-queue the job
-        db.prepare(
-          `UPDATE jobs SET status = 'queued', locked_by_worker_id = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`
-        ).run(now, job.id);
-        jobService.addLog(job.id, null, 'warn', `Job reclaimed from dead worker ${worker.name} (${worker.id})`);
-        reclaimedJobs++;
+        for (const job of orphanedJobs) {
+          log.warn(`Reclaiming orphaned job: ${job.name} (${job.id})`);
+          // Re-queue the job
+          db.prepare(
+            `UPDATE jobs SET status = 'queued', locked_by_worker_id = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`
+          ).run(now, job.id);
+          jobService.addLog(job.id, null, 'warn', `Job reclaimed from dead worker ${worker.name} (${worker.id})`);
+          reclaimedJobs++;
+        }
       }
+
+      return { staleWorkers: staleWorkers.length, reclaimedJobs };
+    });
+
+    const result = txn();
+
+    if (result.staleWorkers > 0) {
+      log.info(`Reaper cycle: ${result.staleWorkers} stale workers, ${result.reclaimedJobs} jobs reclaimed`);
     }
 
-    if (staleWorkers.length > 0) {
-      log.info(`Reaper cycle: ${staleWorkers.length} stale workers, ${reclaimedJobs} jobs reclaimed`);
-    }
-
-    return { staleWorkers: staleWorkers.length, reclaimedJobs };
+    return result;
   }
 }
 

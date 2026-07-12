@@ -17,6 +17,21 @@ let workerRecord: Worker | null = null;
 let isShuttingDown = false;
 const activeJobs = new Map<string, Promise<void>>();
 
+// Exponential backoff state
+let consecutiveEmptyPolls = 0;
+const BASE_POLL_MS = 1000;
+const BACKOFF_STEP_MS = 500;
+const MAX_POLL_MS = 5000;
+
+// Queue list cache
+let cachedQueues: { id: string }[] = [];
+let queueCacheExpiry = 0;
+const QUEUE_CACHE_TTL_MS = 30000;
+
+function getCurrentPollInterval(): number {
+  return Math.min(BASE_POLL_MS + consecutiveEmptyPolls * BACKOFF_STEP_MS, MAX_POLL_MS);
+}
+
 async function start() {
   // Get all queues to poll (in a real system, this would be configurable)
   const db = getDb();
@@ -40,21 +55,33 @@ async function start() {
     }
   }, config.heartbeatIntervalMs);
 
-  // Start polling loop
-  const pollInterval = setInterval(async () => {
+  // Start polling loop with dynamic interval
+  let pollTimeout: ReturnType<typeof setTimeout>;
+
+  async function pollTick() {
     if (isShuttingDown) return;
-    if (activeJobs.size >= config.defaultConcurrency) return;
+    if (activeJobs.size >= config.defaultConcurrency) {
+      pollTimeout = setTimeout(pollTick, getCurrentPollInterval());
+      return;
+    }
 
-    // Refresh queue list periodically
-    const currentQueues = db.prepare(`SELECT id FROM queues WHERE is_paused = 0`).all() as { id: string }[];
+    // Refresh queue list from cache (only re-query every 30 seconds)
+    const now = Date.now();
+    if (now >= queueCacheExpiry) {
+      cachedQueues = db.prepare(`SELECT id FROM queues WHERE is_paused = 0`).all() as { id: string }[];
+      queueCacheExpiry = now + QUEUE_CACHE_TTL_MS;
+    }
 
-    for (const queue of currentQueues) {
+    let claimedAny = false;
+
+    for (const queue of cachedQueues) {
       if (activeJobs.size >= config.defaultConcurrency) break;
       if (isShuttingDown) break;
 
       try {
         const job = jobService.claimJob(queue.id, workerRecord!.id);
         if (job) {
+          claimedAny = true;
           log.info(`Claimed job: ${job.name} (${job.id})`);
           const promise = executeJob(job.id).finally(() => {
             activeJobs.delete(job.id);
@@ -65,7 +92,21 @@ async function start() {
         log.error(`Error claiming from queue ${queue.id}: ${err.message}`);
       }
     }
-  }, config.workerPollIntervalMs);
+
+    // Exponential backoff: track consecutive empty polls
+    if (claimedAny) {
+      consecutiveEmptyPolls = 0;
+    } else {
+      consecutiveEmptyPolls++;
+    }
+
+    if (!isShuttingDown) {
+      pollTimeout = setTimeout(pollTick, getCurrentPollInterval());
+    }
+  }
+
+  // Kick off the first poll
+  pollTimeout = setTimeout(pollTick, BASE_POLL_MS);
 
   // Graceful shutdown
   async function shutdown(signal: string) {
@@ -77,7 +118,7 @@ async function start() {
       workerService.setDraining(workerRecord.id);
     }
 
-    clearInterval(pollInterval);
+    clearTimeout(pollTimeout);
 
     // Wait for active jobs to finish
     if (activeJobs.size > 0) {

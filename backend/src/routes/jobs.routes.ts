@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { jobService } from '../services/job.service';
 import { geminiService } from '../services/gemini-service';
+import { schedulerService } from '../services/scheduler.service';
 
 const router = Router();
 
@@ -39,6 +40,15 @@ router.post('/queues/:queueId/jobs', validate(createJobSchema), (req: Request, r
   } catch (err: any) {
     res.status(400).json({ success: false, error: { message: err.message, code: 'BAD_REQUEST' } });
   }
+});
+
+// List active schedules in a queue
+router.get('/queues/:queueId/schedules', (req: Request, res: Response) => {
+  const schedules = schedulerService.listSchedules(req.params.queueId as string);
+  res.json({
+    success: true,
+    data: schedules
+  });
 });
 
 // List jobs in a queue
